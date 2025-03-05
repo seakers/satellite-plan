@@ -3,6 +3,8 @@ import datetime
 import csv
 import math
 import os
+import pandas as pd
+from tqdm import tqdm
 
 def precess(ttt):
     ttt2 = ttt*ttt
@@ -313,7 +315,7 @@ def pitchroll2ecisurface(r_eci,v_eci, pitch, roll):
 
     
 
-def process_mission(settings):
+def process_mission(settings, sim_num, num_sats):
     print("Processing mission")
     time = settings["time"]["initial_datetime"]
     base_directory = settings["directory"]
@@ -330,6 +332,8 @@ def process_mission(settings):
 
     satellites = []
 
+    # load satellite data
+    print("Loading satellite data...")
     for subdir in os.listdir(directory):
         satellite = {}
         if "comm" in subdir:
@@ -397,12 +401,13 @@ def process_mission(settings):
         if "orbitpy_id" in satellite:
             satellites.append(satellite)
 
+    # output satellite positions
     timestep = settings["time"]["step_size"]
     duration = settings["time"]["duration"]*86400
     steps = np.arange(0,duration,timestep,dtype=int)
     if not os.path.exists(base_directory+'sat_positions'):
         os.mkdir(base_directory+'sat_positions')
-        for i in range(len(steps)):
+        for i in tqdm(range(len(steps)), desc="Outputting satellite positions", leave=True):
             sat_positions = []
             for sat in satellites:
                 name = sat["orbitpy_id"]
@@ -422,6 +427,7 @@ def process_mission(settings):
                 for pos in sat_positions:
                     csvwriter.writerow(pos)
 
+    # output satellite visibilities
     if not os.path.exists(base_directory+'sat_visibilities'):
         os.mkdir(base_directory+'sat_visibilities')
         for i in range(len(steps)):
@@ -447,6 +453,7 @@ def process_mission(settings):
                 for vis in sat_visibilities:
                     csvwriter.writerow(vis)
 
+    # output observation overlaps
     if not os.path.exists(base_directory+'overlaps'):
         os.mkdir(base_directory+'overlaps')
         for i in range(len(steps)):
@@ -466,6 +473,7 @@ def process_mission(settings):
                 for overlap in overlaps:
                     csvwriter.writerow(overlap)
 
+    # output satellite observations
     if not os.path.exists(base_directory+'sat_observations'):
         os.mkdir(base_directory+'sat_observations')
         for i in range(len(steps)):
@@ -491,6 +499,7 @@ def process_mission(settings):
                 for obs in sat_observations:
                     csvwriter.writerow(obs)
 
+    # output constellation past observations
     if not os.path.exists(base_directory+'constellation_past_observations'):
         os.mkdir(base_directory+'constellation_past_observations')
         past_observations = []
@@ -515,6 +524,7 @@ def process_mission(settings):
                 for obs in past_observations:
                     csvwriter.writerow(obs)
 
+    # output constellation future observations    
     if not os.path.exists(base_directory+'ground_swaths'):
         os.mkdir(base_directory+'ground_swaths')
 
@@ -616,6 +626,124 @@ def process_mission(settings):
                     for event in events_per_step:
                         csvwriter.writerow(event)
 
+    grid = pd.read_csv(base_directory+'orbit_data/grid0.csv')
+    scenarios = pd.read_csv('./experiments_files/experiments.csv')
+    events = pd.read_csv('./experiments_files/events/experiment_'+str(sim_num)+'_events.csv')
+    num_events_per_day = scenarios['Number of Events per Day']
+
+    for sat_num in range(0, num_sats):
+        if os.path.exists(base_directory+'orbit_data/sat'+str(sat_num)):
+            datametrics_file = pd.read_csv(base_directory+'orbit_data/sat'+str(sat_num)+'/datametrics_instru0_mode0_grid0.csv', skiprows=4)
+            accessibile_lat = datametrics_file['lat [deg]']
+            accessible_lon = datametrics_file['lon [deg]']
+            df = pd.DataFrame({'Lat': accessibile_lat, 'Lon': accessible_lon})
+            if sat_num == 0:
+                df.to_csv(base_directory+'TotalGroundPointsObserved.csv', index=False)
+            elif sat_num > 0:
+                df.to_csv(base_directory+'TotalGroundPointsObserved.csv', mode='a', index=False, header=False)
+
+    Total_gp_observed_file = pd.read_csv(base_directory+'TotalGroundPointsObserved.csv')
+
+    Accessible_ground_points = Total_gp_observed_file.drop_duplicates()
+
+    for sat_num in range(0, num_sats):
+        if os.path.exists(base_directory+'orbit_data/sat'+str(sat_num)):
+            replan_file = pd.read_csv(base_directory+'orbit_data/sat'+str(sim_num)+'/replan_intervaldphet.csv', header=None, usecols=[0,2,3], names=['time', 'lat', 'lon'])
+            time = replan_file['time'] * 10
+            observed_lat = replan_file['lat']
+            observed_long = replan_file['lon']
+            df = pd.DataFrame({'time': time, 'Lat': observed_lat, 'Lon': observed_long})
+            df_1 = df.assign(sat_no = sat_num)
+            intruments = ["visual", "sar", "thermal"]
+            instru = sat_num % len(intruments)
+            df_2 = df_1.assign(instrument = intruments[instru])
+            if sat_num == 0:
+                df_2.to_csv(base_directory+'TotalObservations.csv', index=False)
+            elif sat_num > 0:
+                df_2.to_csv(base_directory+'TotalObservations.csv', mode='a', index=False, header=False)
+
+    Total_observations_file = pd.read_csv(base_directory+'TotalObservations.csv')
+    Observed_ground_points = Total_observations_file.drop_duplicates()
+
+    Total_observations_file = Total_observations_file.rename(columns={'Lat': 'lat [deg]', 'Lon': 'lon [deg]'})
+    matching_coord = events.merge(Total_observations_file, on=['lat [deg]', 'lon [deg]'], how='inner')
+
+    events_observed = []
+    if not matching_coord.empty:
+        for index, row in matching_coord.iterrows():
+            observed_rows = {}
+            if row.loc['time'] > row.loc['start time [s]'] and row.loc['time'] < row.loc['start time [s]'] + row.loc['duration [s]']:
+                observed_rows.update(row)
+                events_observed.append(observed_rows)
+        num_events_observed = len(events_observed)
+    else:
+        num_events_observed = 0
+        
+    events_observed = pd.DataFrame(events_observed)
+
+    events_reobserved = 0
+    for value in events_observed.duplicated(subset=['lat [deg]', 'lon [deg]']):
+        if value:
+            events_reobserved += 1
+
+    duplicate_count = 0
+    for value in Total_observations_file.duplicated(subset=['lat [deg]', 'lon [deg]']):
+        if value:
+            duplicate_count += 1
+
+    events_coobserved = events_observed.drop_duplicates(subset=['lat [deg]', 'lon [deg]', 'instrument'])
+
+    num_coobserved = 0
+    for row in events_coobserved.duplicated(subset=['lat [deg]', 'lon [deg]']):
+        if row:
+            num_coobserved += 1
+
+    grouped_dict = {}
+    num_fully_coobserved = 0
+    if not events_coobserved.empty:
+        for gp_value, group in events_coobserved.groupby('gp_index'):
+            grouped_dict[gp_value] = group
+            grouped_dataframe = pd.DataFrame(group)
+            unique_instru = grouped_dataframe.instrument.unique()
+            measurements = grouped_dataframe.measurements.unique()
+            measurements = measurements[0].strip('[]').split(',')
+            unique_instru = set(unique_instru)
+            measurements = set(measurements)
+            if measurements.issubset(unique_instru):
+                num_fully_coobserved += 1
+    else:
+        num_fully_coobserved = 0
+
+    columns = [ 'Sim Number',
+                'Number of Ground Points', 
+                'Number of Ground Points Accessible', 
+                "Number of Events", 
+                "Number of Observations", 
+                "Number of Events Observed", 
+                "Number of Ground Points Observed", 
+                "Number of Re-Observations", 
+                "Number of Events Re-Observed",
+                "Number of Events Co-Observed",
+                "Number of Events Fully Co-Observed" ]
+    data = [[sim_num,
+            len(grid), 
+            len(Accessible_ground_points), 
+            num_events_per_day[sim_num], 
+            len(Total_observations_file), 
+            num_events_observed, 
+            len(Observed_ground_points), 
+            duplicate_count,
+            events_reobserved,
+            num_coobserved,
+            num_fully_coobserved]]
+
+    results_data = pd.DataFrame(columns=columns, data=data)
+
+    if sim_num == 0:
+        results_data.to_csv("./missions"+'/results.csv', index=False)
+    elif sim_num > 0:
+        results_data.to_csv("./missions"+'/results.csv', mode='a', index=False, header=False)
+    
     print("Processed mission!")
 
 if __name__ == "__main__":

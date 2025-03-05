@@ -12,18 +12,31 @@ from src.plot_mission_heterogeneous import plot_mission_het
 from src.utils.compute_experiment_statistics import compute_experiment_statistics
 from src.utils.compute_experiment_statistics_het import compute_experiment_statistics_het
 from src.utils.process_coobs import process_coobs
+import pandas as pd
 
-def main(homhet_flag):
-    name = "full_mission_test_het"
+scenarios = pd.read_csv('scenarios.csv')
+
+experiments = scenarios['Name']
+num_planes = scenarios['Number Planes']
+num_sats_per_planes = scenarios['Number of Satellites per Plane']
+field_of_regard = scenarios['Field of Regard (deg)']
+field_of_view = scenarios['Field of View (deg)']
+max_slew_rate = scenarios['Maximum Slew Rate (deg/s)']
+num_events_per_day = scenarios['Number of Events per Day']
+event_duration = scenarios['Event Duration (hrs)']
+
+
+def main(sim_num, homhet_flag):
+    name = "full_mission_test_het_{}".format(sim_num)
     settings = {
         "name": name,
         "instrument": {
-            "ffor": 30,
-            "ffov": 0
+            "ffor": int(field_of_regard[sim_num]),
+            "ffov": int(field_of_view[sim_num])
         },
         "agility": {
             "slew_constraint": "rate",
-            "max_slew_rate": 0.1,
+            "max_slew_rate": int(max_slew_rate[sim_num]),
             "inertia": 2.66,
             "max_torque": 4e-3
         },
@@ -34,13 +47,13 @@ def main(homhet_flag):
             "argper": 0, # deg
         },
         "constellation": {
-            "num_sats_per_plane": 3,
-            "num_planes": 3,
+            "num_sats_per_plane": int(num_sats_per_planes[sim_num]),
+            "num_planes": int(num_planes[sim_num]),
             "phasing_parameter": 1
         },
         "events": {
-            "event_duration": 3600*6,
-            "event_frequency": 0.01/3600, # 0.01 events/hr * (1hr/3600s) = events / s
+            "event_duration": 3600*int(event_duration[sim_num]),
+            "event_frequency": int(num_events_per_day[sim_num]) / (24 * 3600),   # events / s
             "event_density": 2,
             "event_clustering": 4
         },
@@ -66,7 +79,7 @@ def main(homhet_flag):
             "plot_obs": True
         },
         "planner": "dp",
-        "event_csvs": [],
+        "event_csvs": ["./experiments_files/events/experiment_{}_events.csv".format(sim_num)],
         "num_meas_types": 3,
         "sharing_horizon": 1000,
         "planning_horizon": 1000,
@@ -76,25 +89,35 @@ def main(homhet_flag):
         "process_obs_only": False,
         "conops": "onboard_processing"
     }
+    if settings["constellation"]["num_sats_per_plane"] == 0:
+        raise Exception("Number of satellites is 0")
+
+    if settings["constellation"]["num_planes"] == 0:
+        raise Exception("Number of planes is 0")
+
     if not os.path.exists(settings["directory"]):
         os.mkdir(settings["directory"])
     if not os.path.exists(settings["directory"]+'orbit_data/'):
         os.mkdir(settings["directory"]+'orbit_data/')
     create_mission(settings)
     execute_mission(settings)
+
+    num_sats = settings["constellation"]["num_planes"] * settings["constellation"]["num_sats_per_plane"]
+
     if homhet_flag == "homogeneous":
         if settings["preplanned_observations"] is None:
             plan_mission_replan_interval(settings) # must come before process as process expects a plan.csv in the orbit_data directory
-        process_mission(settings)
+        process_mission(settings, sim_num, num_sats)
         plot_mission(settings)
     elif homhet_flag == "heterogeneous":
         if settings["preplanned_observations"] is None:
             plan_mission_replan_interval_het(settings) # must come before process as process expects a plan.csv in the orbit_data directory
-        process_mission(settings)
+        process_mission(settings, sim_num, num_sats)
         plot_mission_het(settings)
     else:
         print("Invalid homhet_flag")
 
+for sim_num in range(0, len(experiments)+1):
+    if __name__ == "__main__":
+        main(sim_num, homhet_flag="heterogeneous")
 
-if __name__ == "__main__":
-    main(homhet_flag="heterogeneous")
