@@ -14,7 +14,7 @@ from src.utils.compute_experiment_statistics_het import compute_experiment_stati
 from src.utils.process_coobs import process_coobs
 import pandas as pd
 
-scenarios = pd.read_csv('scenarios.csv')
+scenarios = pd.read_csv('./satplan_parametric/satplan_test_case_2_seed-1000.csv')
 
 experiments = scenarios['Name']
 num_planes = scenarios['Number Planes']
@@ -24,10 +24,15 @@ field_of_view = scenarios['Field of View (deg)']
 max_slew_rate = scenarios['Maximum Slew Rate (deg/s)']
 num_events_per_day = scenarios['Number of Events per Day']
 event_duration = scenarios['Event Duration (hrs)']
-
+grid_type = scenarios['Grid Type']
+num_ground_points = scenarios['Number of Ground-Points']
+horizon = scenarios['Preplanning Period']
+preplanner = scenarios['Preplanner']
+scenario_id = scenarios['Scenario ID']
 
 def main(sim_num, homhet_flag):
-    name = "full_mission_test_het_{}".format(sim_num)
+    # name = "full_mission_test_het_{}".format(sim_num)
+    name = str(scenario_id[sim_num]) + "_" + str(preplanner[sim_num]) + "_" + str(grid_type[sim_num]) + "_" + str(num_ground_points[sim_num])
     settings = {
         "name": name,
         "instrument": {
@@ -59,7 +64,7 @@ def main(sim_num, homhet_flag):
         },
         "time": {
             "step_size": 10, # seconds
-            "duration": 0.1, # days
+            "duration": 1, # days
             "initial_datetime": datetime.datetime(2020,1,1,0,0,0)
         },
         "rewards": {
@@ -79,15 +84,17 @@ def main(sim_num, homhet_flag):
             "plot_obs": True
         },
         "planner": "dp",
-        "event_csvs": ["./experiments_files/events/experiment_{}_events.csv".format(sim_num)],
+        "event_csvs": ["./satplan_parametric/events/scenario_"+str(scenario_id[sim_num])+"_events.csv"],
         "num_meas_types": 3,
-        "sharing_horizon": 1000,
-        "planning_horizon": 1000,
+        "sharing_horizon": int(horizon[sim_num]),
+        "planning_horizon": int(horizon[sim_num]),
         "directory": "./missions/"+name+"/",
-        "grid_type": "uniform", # can be "uniform" or "custom"
+        "grid_type": "custom", # can be "uniform" or "custom"
         "preplanned_observations": None,
         "process_obs_only": False,
-        "conops": "onboard_processing"
+        "conops": "onboard_processing",
+        "point_grid": "./satplan_parametric/grids/"+str(grid_type[sim_num])+"_grid_"+str(num_ground_points[sim_num])+"_seed-1000.csv",
+        "scenario_file": "./satplan_parametric/satplan_test_case_2_seed-1000.csv"
     }
     if settings["constellation"]["num_sats_per_plane"] == 0:
         raise Exception("Number of satellites is 0")
@@ -113,11 +120,14 @@ def main(sim_num, homhet_flag):
         if settings["preplanned_observations"] is None:
             plan_mission_replan_interval_het(settings) # must come before process as process expects a plan.csv in the orbit_data directory
         process_mission(settings, sim_num, num_sats)
-        plot_mission_het(settings)
+        # plot_mission_het(settings)
     else:
         print("Invalid homhet_flag")
 
-for sim_num in range(0, len(experiments)+1):
-    if __name__ == "__main__":
-        main(sim_num, homhet_flag="heterogeneous")
 
+if __name__ == "__main__":
+    for sim_num in range(0, len(experiments)):
+        if str(preplanner[sim_num]) == "dp":
+            main(sim_num, homhet_flag="heterogeneous")
+        else:
+            continue

@@ -66,15 +66,16 @@ def main(homhet_flag):
             "plot_obs": True
         },
         "planner": "dp",
-        "event_csvs": [],
+        "event_csvs": ["./events/experiment2/events.csv"],
         "num_meas_types": 3,
         "sharing_horizon": 1000,
         "planning_horizon": 1000,
         "directory": "./missions/"+name+"/",
-        "grid_type": "uniform", # can be "uniform" or "custom"
+        "grid_type": "custom", # can be "uniform" or "custom"
         "preplanned_observations": None,
         "process_obs_only": False,
-        "conops": "onboard_processing"
+        "conops": "onboard_processing",
+        "point_grid": "./coverage_grids/experiment2/event_locations.csv"
     }
     if not os.path.exists(settings["directory"]):
         os.mkdir(settings["directory"])
